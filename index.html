@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>編成Pt比べ</title>
+<!--
+  編成ごとの「実効値（スキル5枚）・総合力・イベボ」から、1回のイベントPtを比べる（マルチ・ひとりでライブ）。
+  ネットにつながなくても動く（外のファイルを読まない）。ブラウザで開くだけ。
+
+  式は AN と同じ（an/calc/live_score.py の estimate_multi・solo_score と an/calc/event_point.py）。
+  曲は独りんぼエンヴィー EXPERT。開いたときに AN の計算結果10通りと突き合わせ、ずれたら赤い帯を出す。
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  /* Discord の暗い画面と同じ色（様子・シフト確認のページとそろえる。2026-11-04 ageha） */
+  --bg: #313338; --card: #2b2d31; --text: #dbdee1; --muted: #b5bac1; --line: #3f4147;
+  --accent: #4e5058; --accent-soft: #383a40; --on-accent: #ffffff; --gold: #f2f3f5; --gold-soft: #383a40;
+  --danger: #f23f43; --danger-soft: #2b2d31; --input: #1e1f22;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text); font-variant-numeric: tabular-nums;
+  font-family: "BIZ UDPGothic", "Noto Sans JP", "Hiragino Sans", "Yu Gothic UI", sans-serif;
+  line-height: 1.7; font-size: 16px;
+}
+main { max-width: 860px; margin: 0 auto; padding: 20px 16px 60px; }
+h1 { font-size: 20px; line-height: 1.4; margin: 4px 0 2px; color: #f2f3f5; }
+.lead { color: var(--muted); margin: 0 0 16px; font-size: 14px; }
+.card { background: var(--card); border-radius: 6px; padding: 14px; margin-bottom: 12px; }
+.card h2 { font-size: 16px; margin: 0 0 10px; color: #f2f3f5; }
+label { display: block; font-size: 14px; color: var(--muted); margin-bottom: 4px; }
+input, select {
+  width: 100%; min-height: 44px; padding: 8px 10px; font: inherit; color: var(--text); background: var(--input);
+  border: 0; border-radius: 4px; min-width: 0;
+}
+input:focus, select:focus { outline: 2px solid #00a8fc; outline-offset: -1px; border-color: transparent; }
+.grid { display: grid; gap: 10px; }
+.g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.g5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 600px) {
+  .g3, .g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .g5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* スキル5枚は、先頭を1段で、残り4枚を2×2に */
+  .g5.skills > div:first-child { grid-column: 1 / -1; }
+}
+/* 順位：スマホは縦並び、広い画面は表 */
+.ranklist { list-style: none; margin: 0; padding: 0; }
+.ranklist li { display: grid; grid-template-columns: auto 1fr auto; column-gap: 12px; align-items: baseline;
+  padding: 10px 0; border-bottom: 1px solid var(--line); }
+.ranklist li:last-child { border-bottom: 0; }
+.ranklist .rk { color: var(--muted); font-size: 14px; }
+.ranklist .nm { font-weight: 700; color: var(--text); overflow-wrap: anywhere; }
+.ranklist .pt { font-size: 22px; font-weight: 700; color: #f2f3f5; text-align: right; }
+.ranklist .df { grid-column: 2 / -1; color: var(--muted); font-size: 14px; text-align: right; }
+.ranklist li.top .df { color: var(--text); }
+.wide-only { display: none; }
+@media (min-width: 601px) { .ranklist { display: none; } .wide-only { display: table; } }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; flex-wrap: wrap; }
+.seg button { border: 0; background: transparent; color: var(--text); min-height: 44px; padding: 6px 14px; font: inherit; font-size: 14px; cursor: pointer; }
+.seg button.on { background: #f2f3f5; color: #313338; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.btn { border: 0; background: #4e5058; color: #fff; border-radius: 4px; transition: background-color .1s ease; min-height: 44px; padding: 7px 14px; font: inherit; font-size: 14px; cursor: pointer; }
+.btn.primary { background: #f2f3f5; color: #313338; }
+.btn.primary:hover { background: #ffffff; }
+.btn.ghost { background: transparent; color: var(--muted); }
+.btn.ghost:hover { background: var(--accent-soft); color: var(--text); }
+.btn:hover { background: #6d6f78; }
+.btn:active, .seg button:active { filter: brightness(.85); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+.deck-head { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.deck-head input { font-weight: 600; }
+.deck.best { box-shadow: inset 4px 0 0 #f2f3f5; }
+.out { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); font-size: 14px; color: var(--muted); }
+.out b { color: var(--text); font-size: 15px; font-variant-numeric: tabular-nums; }
+.out .pt b { color: #f2f3f5; font-size: 22px; }
+.err { color: var(--danger); font-size: 14px; margin-top: 8px; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); font-size: 14px; }
+th { font-size: 14px; color: var(--muted); font-weight: 500; }
+td.num, th.num { text-align: right; }
+tr.top td { background: var(--gold-soft); }
+tr.top td:first-child { color: var(--gold); font-weight: 700; }
+.note { font-size: 14px; color: var(--muted); margin: 8px 0 0; }
+.banner { background: var(--card); color: var(--danger); border: 1px solid var(--line); border-left: 3px solid var(--danger); border-radius: 8px; padding: 10px 16px; margin-bottom: 12px; font-size: 14px; display: none; }
+.hidden { display: none; }
+.empty { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>編成Pt比べ</h1>
+  <p class="lead">編成ごとにスキル（実効値）・総合力・イベボを入れると、1回でいちばん Pt が高い編成が分かります。マルチとひとりでライブを選べます。曲は独りんぼエンヴィー EXPERT で、AN と同じ式です。</p>
+
+  <div id="banner" class="banner"></div>
+
+  <section class="card">
+    <h2>結果</h2>
+    <div id="ranking"></div>
+  </section>
+
+  <section class="card">
+    <h2>共通の設定</h2>
+    <div class="grid g4">
+      <div>
+        <label>ライブ</label>
+        <div class="seg" id="liveMode">
+          <button data-v="multi" class="on">マルチ</button><button data-v="solo">ひとりで</button>
+        </div>
+      </div>
+      <div>
+        <label for="lb">ライボ（消費数）</label>
+        <select id="lb"></select>
+      </div>
+      <div>
+        <label>スキルの入れ方</label>
+        <div class="seg" id="skillMode">
+          <button data-v="cards" class="on">5枚ぶん</button><button data-v="leadInt">先頭＋内部値</button><button data-v="leadEff">先頭＋実効値</button><button data-v="eff">実効値だけ</button>
+        </div>
+      </div>
+      <div id="roomSeg">
+        <label>部屋の他の4人</label>
+        <div class="seg" id="roomMode">
+          <button data-v="same" class="on">自分と同じ</button><button data-v="set">入れる</button>
+        </div>
+      </div>
+    </div>
+    <div id="roomBox" class="hidden" style="margin-top:12px">
+      <div class="grid g5">
+        <div><label for="r0">2人目の総合力</label><input id="r0" inputmode="decimal" placeholder="例 30.0"></div>
+        <div><label for="r1">3人目</label><input id="r1" inputmode="decimal"></div>
+        <div><label for="r2">4人目</label><input id="r2" inputmode="decimal"></div>
+        <div><label for="r3">5人目</label><input id="r3" inputmode="decimal"></div>
+        <div><label for="roomEff">部屋の平均実効値</label><input id="roomEff" inputmode="decimal" placeholder="空なら自分の値"></div>
+      </div>
+      <p class="note">マルチのスキルは5人が順に発動し、全員にかかります。支援者も含めた部屋の平均の実効値が分かれば入れてください。</p>
+    </div>
+  </section>
+
+  <div id="decks"></div>
+
+  <div class="row" style="margin-bottom:14px">
+    <button class="btn primary" id="add">＋ 編成を足す</button>
+  </div>
+
+  <p class="note">
+    総合力は「上3桁」（36.0 ＝ 36.0万）でも、360000 のように全部入れても大丈夫です。<br>
+    実効値 ＝ 先頭のスキル ＋ 残り4枚の合計 × 0.2（内部値の最高は 800、実効値の最高は 288）。<br>
+    「先頭＋内部値」は実効値を、「先頭＋実効値」は内部値を出します（残り4枚は同じ値とみなして計算します）。<br>
+    マルチの Pt は目安です（全員 PERFECT から、巻き込み率を見込んで少し下げた値。AN の /計算 と同じ）。<br>
+    ひとりでライブは全部 PERFECT のときの値（出せる最高）です。スキルは5枚それぞれ1回ずつ発動し、最後にもう一度先頭が発動します。<br>
+    入れた内容はこのブラウザにだけ残ります。
+  </p>
+</main>
+
+<script>
+"use strict";
+
+// ---- AN と同じ式（an/calc/live_score.py・an/calc/event_point.py）---------------------------
+const ENVY = {
+  base: 1.1098806440522608,
+  fever: 0.11913862021544797,
+  multi: [0.06913362365344945, 0.07112308044923217, 0.07635535182214072, 0.07771564290625711, 0.06290662388264952, 0.1483786614714646],
+  solo: [0.06913362365344945, 0.07112308044923217, 0.07635535182214072, 0.07771564290625711, 0.06290662388264952, 0.10417790511116198],
+};
+const AP_RATE = 0.85, ACTIVE = 0.015, ROOM = 5;
+const LIVE_BONUS_RATES = [1, 5, 10, 15, 20, 25, 27, 29, 31, 33, 35];
+
+function powerValue(p) { return p < 1000 ? p * 10000 : p; }
+
+function multiScore(own, eff, total) {
+  // Python と同じ順に足す（小数のずれで 1 変わらないように）
+  let skills = 0;
+  for (const w of ENVY.multi) skills += eff / 100 * w;
+  const rate = ENVY.base + AP_RATE * ENVY.fever * 0.5 + skills;
+  return Math.floor(rate * own * 4 + AP_RATE * ROOM * ACTIVE * total);
+}
+
+function multiBase(score, others) {
+  return 110 + Math.floor(score / 17000) + Math.min(13, Math.floor(others / 340000));
+}
+
+// イベボは 252.5 のような小数。分数のまま計算して最後に切り捨てる（AN と同じ）
+function parseDecimal(text) {
+  const s = String(text).normalize("NFKC").trim().replace(/^\+/, "").replace(/%$/, "");
+  const m = /^(\d+)(?:\.(\d+))?$/.exec(s);
+  if (!m) return null;
+  const frac = m[2] || "";
+  return { num: BigInt(m[1] + frac), den: 10n ** BigInt(frac.length) };
+}
+
+function pointOf(base, bonus, lb) {
+  // ⌊ 基礎値 × (1 + ボーナス/100) ⌋ × ライボ倍率（楽曲補正 100%）
+  const p = (BigInt(base) * (100n * bonus.den + bonus.num)) / (100n * bonus.den);
+  return Number(p) * LIVE_BONUS_RATES[lb];
+}
+
+function estimateMulti(power, eff, bonus, lb, roomPowers, roomEff) {
+  const own = powerValue(power);
+  const others = roomPowers ? roomPowers.map(powerValue) : [own, own, own, own];
+  const total = own + others.reduce((a, b) => a + b, 0);
+  const e = roomEff || eff;
+  const score = multiScore(own, e, total);
+  const otherScore = others.reduce((a, p) => a + multiScore(p, e, total), 0);
+  return { score, point: pointOf(multiBase(score, otherScore), bonus, lb) };
+}
+
+// ひとりでライブ：5枚のスキルを小さい順に、重みも小さい順に並べて組にし、6枠目で先頭がもう一度（AN の solo_score）
+function soloScore(power, skills, leader) {
+  const own = powerValue(power);
+  const sk = [...skills].sort((a, b) => a - b);
+  const ws = ENVY.solo.slice(0, 5).sort((a, b) => a - b);
+  let total = 0;
+  for (let k = 0; k < 5; k++) total += sk[k] / 100 * ws[k];
+  total += leader / 100 * ENVY.solo[5];
+  return Math.floor((ENVY.base + total) * own * 4);
+}
+
+function estimateSolo(power, skills, bonus, lb) {
+  const score = soloScore(power, skills, skills[0]);
+  return { score, point: pointOf(100 + Math.floor(score / 20000), bonus, lb) };
+}
+
+// 実効値だけのとき、先頭と残り4枚に分ける（AN の split_effective。残り4枚は同じ値とみなす）
+function skillsFromEffective(eff) {
+  const leader = Math.min(eff >= 280 ? 160 : 150, eff);
+  const internal = Math.max(leader, Math.min(leader + (eff - leader) * 5, 800));
+  const rest = (internal - leader) / 4;
+  return [leader, rest, rest, rest, rest];
+}
+
+// 先頭のスキルと内部値（5枚の合計）から5枚に分ける（残り4枚は同じ値とみなす）
+function skillsFromLeaderInternal(leader, internal) {
+  const rest = (internal - leader) / 4;
+  return [leader, rest, rest, rest, rest];
+}
+
+// 先頭のスキルと実効値から内部値を出す（実効値 ＝ 先頭 ＋ (内部値 − 先頭) × 0.2 の逆）
+function internalFromLeaderEffective(leader, eff) {
+  return leader + (eff - leader) * 5;
+}
+
+function effectiveOf(skills) {
+  const [leader, ...rest] = skills;
+  return leader + rest.reduce((a, b) => a + b, 0) * 0.2;
+}
+
+// ---- 開いたときの突き合わせ（AN の estimate_multi で出した値）--------------------------------
+const CHECKS = [
+  [36.0, 250.0, "252.5", null, 10, 3606097, 41300],
+  [25.3, 214.6, "180", null, 0, 2353150, 730],
+  [41.2, 288.0, "333.33", null, 5, 4443613, 41575],
+  [30.0, 230.0, "200", [28.0, 35.0, 40.0, 22.5], 3, 2887240, 13140],
+  [18.7, 180.4, "95.5", null, 1, 1609941, 2120],
+];
+// ひとりでライブ（AN の solo_score。後ろ2つは実効値 230・284.4 から分けたもの）
+const SOLO_CHECKS = [
+  [36.0, [160, 150, 150, 150, 150], "252.5", 10, 2621071, 28490],
+  [25.3, [150, 112.5, 112.5, 112.5, 112.5], "180", 0, 1717545, 518],
+  [41.2, [160, 160, 160, 160, 160], "333.33", 5, 3045735, 27275],
+  [30.0, skillsFromEffective(230.0), "200", 3, 1994687, 8955],
+  [18.7, skillsFromEffective(284.4), "95.5", 1, 1373000, 1640],
+];
+(function selfCheck() {
+  const bad = CHECKS.filter(([p, e, b, r, lb, score, pt]) => {
+    const got = estimateMulti(p, e, parseDecimal(b), lb, r, null);
+    return got.score !== score || got.point !== pt;
+  });
+  const badSolo = SOLO_CHECKS.filter(([p, skills, b, lb, score, pt]) => {
+    const got = estimateSolo(p, skills, parseDecimal(b), lb);
+    return got.score !== score || got.point !== pt;
+  });
+  bad.push(...badSolo);
+  if (bad.length) {
+    const el = document.getElementById("banner");
+    el.textContent = `計算が AN とずれています（${bad.length}件）。このブラウザでは結果を信用しないでください。`;
+    el.style.display = "block";
+  }
+})();
+
+// ---- 画面 ---------------------------------------------------------------------------------
+const KEY = "pt-compare-v1";
+const blankDeck = (n) => ({ name: `編成${n}`, power: "", bonus: "", skills: ["", "", "", "", ""], eff: "", leader: "", internal: "" });
+let state = { live: "multi", lb: 0, skillMode: "cards", roomMode: "same", room: ["", "", "", ""], roomEff: "", decks: [blankDeck(1), blankDeck(2)] };
+try {
+  const saved = JSON.parse(localStorage.getItem(KEY) || "null");
+  if (saved && Array.isArray(saved.decks)) state = Object.assign(state, saved);
+} catch (_) { /* 残せないブラウザでも動く */ }
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (_) {} };
+
+const num = (v) => {
+  const s = String(v ?? "").normalize("NFKC").trim();
+  if (s === "") return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+};
+const fmt = (n) => n.toLocaleString("ja-JP");
+const fmt1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function evaluate(deck) {
+  const power = num(deck.power);
+  if (power === null) return { error: null, empty: true };
+  if (Number.isNaN(power) || power <= 0) return { error: "総合力は数で入れてください" };
+  const bonus = parseDecimal(deck.bonus === "" ? "0" : deck.bonus);
+  if (!bonus) return { error: "イベボは 252.5 のような数で入れてください" };
+  let eff, internal = null, skills;
+  if (state.skillMode === "cards") {
+    // 外の skills へ入れるので、ここで同じ名前を const で作らない（作ると代入で止まり、5枚ぶんの計算が出なかった。2026-11-04）
+    const raw = deck.skills.map(num);
+    if (raw[0] === null) return { error: "先頭のスキルを入れてください" };
+    if (raw.some((s) => Number.isNaN(s) || (s !== null && s < 0))) return { error: "スキルは数で入れてください" };
+    const filled = raw.map((s) => s ?? 0);
+    if (filled.some((s) => s > 160)) return { error: "1枚のスキルは 160 までです" };
+    skills = filled;
+    eff = effectiveOf(filled);
+    internal = filled.reduce((a, b) => a + b, 0);
+  } else if (state.skillMode === "leadInt" || state.skillMode === "leadEff") {
+    // 先頭のスキル＋内部値 → 実効値、先頭のスキル＋実効値 → 内部値（2026-11-09 ageha）
+    const leader = num(deck.leader);
+    if (leader === null) return { error: "先頭のスキルを入れてください" };
+    if (Number.isNaN(leader) || leader <= 0) return { error: "先頭のスキルは数で入れてください" };
+    if (leader > 160) return { error: "先頭のスキルは 160 までです" };
+    if (state.skillMode === "leadInt") {
+      internal = num(deck.internal);
+      if (internal === null) return { error: "内部値を入れてください" };
+      if (Number.isNaN(internal) || internal <= 0) return { error: "内部値は数で入れてください" };
+      if (internal > 800) return { error: "内部値の最高は 800 です" };
+      if (internal < leader) return { error: "内部値が先頭のスキルより小さくなっています" };
+    } else {
+      eff = num(deck.eff);
+      if (eff === null) return { error: "実効値を入れてください" };
+      if (Number.isNaN(eff) || eff <= 0) return { error: "実効値は数で入れてください" };
+      if (eff > 288) return { error: "実効値の最高は 288 です" };
+      if (eff < leader) return { error: "実効値が先頭のスキルより小さくなっています" };
+      internal = internalFromLeaderEffective(leader, eff);
+      if (internal > 800 + 1e-9) return { error: `この先頭と実効値だと内部値が ${fmt1(internal)} になり、最高の 800 を超えます` };
+    }
+    skills = skillsFromLeaderInternal(leader, internal);
+    if (skills[1] > 160 + 1e-9) return { error: "残り4枚が1枚 160 を超えます（先頭か内部値を見直してください）" };
+    eff = effectiveOf(skills);
+  } else {
+    eff = num(deck.eff);
+    if (eff === null) return { error: "実効値を入れてください" };
+    if (Number.isNaN(eff) || eff <= 0) return { error: "実効値は数で入れてください" };
+    if (eff > 288) return { error: "実効値の最高は 288 です" };
+    skills = skillsFromEffective(eff);
+  }
+  if (state.live === "solo") return { eff, internal, ...estimateSolo(power, skills, bonus, state.lb) };
+  let roomPowers = null, roomEff = null;
+  if (state.roomMode === "set") {
+    const r = state.room.map(num);
+    if (r.some((v) => v === null)) return { error: "部屋の他の4人の総合力を全部入れてください" };
+    if (r.some((v) => Number.isNaN(v) || v <= 0)) return { error: "部屋の総合力は数で入れてください" };
+    roomPowers = r;
+    const re = num(state.roomEff);
+    if (re !== null) {
+      if (Number.isNaN(re) || re <= 0 || re > 288) return { error: "部屋の平均実効値は 288 までの数で入れてください" };
+      roomEff = re;
+    }
+  }
+  const out = estimateMulti(power, eff, bonus, state.lb, roomPowers, roomEff);
+  return { eff, internal, ...out };
+}
+
+function renderDecks() {
+  const box = document.getElementById("decks");
+  box.innerHTML = state.decks.map((d, i) => `
+    <section class="card deck" data-i="${i}">
+      <div class="deck-head">
+        <input data-f="name" value="${esc(d.name)}" aria-label="編成の名前">
+        <button class="btn ghost" data-act="copy" title="この編成を写して足す">写す</button>
+        <button class="btn ghost" data-act="del" title="この編成を消す">消す</button>
+      </div>
+      <div class="grid ${state.skillMode === "leadInt" || state.skillMode === "leadEff" ? "g4" : "g3"}">
+        <div><label>総合力</label><input data-f="power" inputmode="decimal" placeholder="例 36.0" value="${esc(d.power)}"></div>
+        <div><label>イベボ（％）</label><input data-f="bonus" inputmode="decimal" placeholder="例 252.5" value="${esc(d.bonus)}"></div>
+        <div class="${state.skillMode === "leadInt" || state.skillMode === "leadEff" ? "" : "hidden"}"><label>先頭のスキル（％）</label><input data-f="leader" inputmode="decimal" placeholder="例 160" value="${esc(d.leader ?? "")}"></div>
+        <div class="${state.skillMode === "leadInt" ? "" : "hidden"}"><label>内部値</label><input data-f="internal" inputmode="decimal" placeholder="例 760" value="${esc(d.internal ?? "")}"></div>
+        <div class="${state.skillMode === "eff" || state.skillMode === "leadEff" ? "" : "hidden"}"><label>実効値（％）</label><input data-f="eff" inputmode="decimal" placeholder="例 250" value="${esc(d.eff)}"></div>
+      </div>
+      <div class="grid g5 skills ${state.skillMode === "cards" ? "" : "hidden"}" style="margin-top:10px">
+        ${d.skills.map((s, k) => `<div><label>${k === 0 ? "先頭のスキル" : `${k + 1}枚目`}</label><input data-f="skill" data-k="${k}" inputmode="decimal" placeholder="${k === 0 ? "例 160" : "例 150"}" value="${esc(s)}"></div>`).join("")}
+      </div>
+      <div class="out" data-out></div>
+    </section>`).join("");
+  update();
+}
+
+function update() {
+  const results = state.decks.map(evaluate);
+  document.querySelectorAll(".deck").forEach((el, i) => {
+    const r = results[i];
+    const out = el.querySelector("[data-out]");
+    if (r.empty) out.innerHTML = `<span>総合力を入れると計算します</span>`;
+    else if (r.error) out.innerHTML = `<span class="err">${esc(r.error)}</span>`;
+    else out.innerHTML =
+      `<span>実効値 <b>${fmt1(r.eff)}%</b></span>` +
+      (r.internal !== null ? `<span>内部値 <b>${fmt1(r.internal)}</b></span>` : "") +
+      `<span>スコア <b>${fmt(r.score)}</b></span>` +
+      `<span class="pt">1回 <b>${fmt(r.point)} Pt</b></span>`;
+  });
+  const ok = results.map((r, i) => ({ r, i })).filter((x) => !x.r.empty && !x.r.error);
+  ok.sort((a, b) => b.r.point - a.r.point || b.r.score - a.r.score);
+  const best = ok.length ? ok[0].r.point : null;
+  document.querySelectorAll(".deck").forEach((el, i) => el.classList.toggle("best", ok.length > 1 && results[i].point === best));
+  const rank = document.getElementById("ranking");
+  if (!ok.length) { rank.innerHTML = `<p class="empty">下の編成に総合力などを入れると、ここに順位が出ます。</p>`; return; }
+  // スマホでは「編成・Pt・1位との差」だけを縦に並べる（6列の表は広い画面だけ。2026-11-04 ChatGPT の見立て）
+  const list = `<ol class="ranklist">` + ok.map((x, n) => `<li class="${x.r.point === best ? "top" : ""}">`
+    + `<span class="rk">${n + 1}位</span><span class="nm">${esc(state.decks[x.i].name)}</span>`
+    + `<span class="pt">${fmt(x.r.point)} Pt</span>`
+    + `<span class="df">${x.r.point === best ? "いちばん高い" : "1位との差 −" + fmt(best - x.r.point) + " Pt"}</span></li>`).join("") + `</ol>`;
+  rank.innerHTML = list + `<table class="wide-only"><thead><tr><th>順位</th><th>編成</th><th class="num">実効値</th><th class="num">スコア</th><th class="num">1回のPt</th><th class="num">1位との差</th></tr></thead><tbody>` +
+    ok.map((x, n) => `<tr class="${x.r.point === best ? "top" : ""}"><td>${n + 1}</td><td>${esc(state.decks[x.i].name)}</td><td class="num">${fmt1(x.r.eff)}%</td><td class="num">${fmt(x.r.score)}</td><td class="num"><b>${fmt(x.r.point)}</b></td><td class="num">${x.r.point === best ? "—" : "−" + fmt(best - x.r.point)}</td></tr>`).join("") +
+    `</tbody></table><p class="note">ライボ ${state.lb} 個（×${LIVE_BONUS_RATES[state.lb]}）・${state.live === "solo" ? "ひとりでライブ（全部 PERFECT）" : "マルチ"}・独りんぼエンヴィー EXPERT</p>`;
+  save();
+}
+
+// 入力
+document.getElementById("decks").addEventListener("input", (e) => {
+  const deckEl = e.target.closest(".deck");
+  if (!deckEl) return;
+  const d = state.decks[Number(deckEl.dataset.i)];
+  const f = e.target.dataset.f;
+  if (f === "skill") d.skills[Number(e.target.dataset.k)] = e.target.value;
+  else if (f) d[f] = e.target.value;
+  update();
+});
+document.getElementById("decks").addEventListener("click", (e) => {
+  const act = e.target.dataset.act;
+  if (!act) return;
+  const i = Number(e.target.closest(".deck").dataset.i);
+  if (act === "del") {
+    if (state.decks.length === 1) state.decks = [blankDeck(1)];
+    else state.decks.splice(i, 1);
+  } else if (act === "copy") {
+    const c = JSON.parse(JSON.stringify(state.decks[i]));
+    c.name += "（写し）";
+    state.decks.splice(i + 1, 0, c);
+  }
+  renderDecks();
+});
+document.getElementById("add").addEventListener("click", () => { state.decks.push(blankDeck(state.decks.length + 1)); renderDecks(); });
+
+const lb = document.getElementById("lb");
+lb.innerHTML = LIVE_BONUS_RATES.map((r, i) => `<option value="${i}">${i} 個（×${r}）</option>`).join("");
+lb.value = String(state.lb);
+lb.addEventListener("change", () => { state.lb = Number(lb.value); update(); });
+
+function seg(id, key, after) {
+  const el = document.getElementById(id);
+  const paint = () => el.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === state[key]));
+  el.addEventListener("click", (e) => { if (!e.target.dataset.v) return; state[key] = e.target.dataset.v; paint(); after(); });
+  paint();
+}
+const roomBox = document.getElementById("roomBox");
+const roomSeg = document.getElementById("roomSeg");
+const paintRoom = () => {
+  // ひとりでライブには部屋が無い
+  roomSeg.classList.toggle("hidden", state.live === "solo");
+  roomBox.classList.toggle("hidden", state.live === "solo" || state.roomMode !== "set");
+};
+seg("liveMode", "live", () => { paintRoom(); update(); });
+seg("skillMode", "skillMode", renderDecks);
+seg("roomMode", "roomMode", () => { paintRoom(); update(); });
+paintRoom();
+["r0", "r1", "r2", "r3"].forEach((id, k) => {
+  const el = document.getElementById(id);
+  el.value = state.room[k] || "";
+  el.addEventListener("input", () => { state.room[k] = el.value; update(); });
+});
+const roomEff = document.getElementById("roomEff");
+roomEff.value = state.roomEff || "";
+roomEff.addEventListener("input", () => { state.roomEff = roomEff.value; update(); });
+
+renderDecks();
+</script>
+</body>
+</html>
